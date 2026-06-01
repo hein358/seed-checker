@@ -25,9 +25,17 @@ const TronWeb = TronWebModule.default || TronWebModule;
 
 // ─── Config ──────────────────────────────────────────────────────────
 
+// Multiple RPCs for fallback when rate limited
+const ETH_RPCS = [
+  "https://rpc.ankr.com/eth",
+  "https://eth.meowrpc.com",
+  "https://1rpc.io/eth",
+  "https://ethereum-rpc.publicnode.com",
+];
+let ethRpcIndex = 0;
+
 const RPC = {
   solana: "https://api.mainnet-beta.solana.com",
-  ethereum: "https://rpc.ankr.com/eth",
   tron: "https://api.trongrid.io",
 };
 
@@ -117,20 +125,30 @@ async function checkSolBalance(address) {
 }
 
 async function checkEthBalance(address) {
-  try {
-    const provider = new ethers.JsonRpcProvider(RPC.ethereum);
-    const balance = await provider.getBalance(address);
-    const ethBalance = parseFloat(ethers.formatEther(balance));
-
-    let usdtBalance = 0;
+  // Try multiple RPCs with fallback
+  for (let attempt = 0; attempt < ETH_RPCS.length; attempt++) {
+    const rpcUrl = ETH_RPCS[(ethRpcIndex + attempt) % ETH_RPCS.length];
     try {
-      const c = new ethers.Contract(USDT.eth, ["function balanceOf(address) view returns (uint256)"], provider);
-      usdtBalance = parseFloat(ethers.formatUnits(await c.balanceOf(address), 6));
-    } catch {}
-    return { eth: ethBalance, usdt: usdtBalance };
-  } catch (err) {
-    return { eth: 0, usdt: 0, error: err.message };
+      const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, {
+        staticNetwork: ethers.Network.from("mainnet"),
+      });
+      const balance = await provider.getBalance(address);
+      const ethBalance = parseFloat(ethers.formatEther(balance));
+
+      let usdtBalance = 0;
+      try {
+        const c = new ethers.Contract(USDT.eth, ["function balanceOf(address) view returns (uint256)"], provider);
+        usdtBalance = parseFloat(ethers.formatUnits(await c.balanceOf(address), 6));
+      } catch {}
+      
+      ethRpcIndex = (ethRpcIndex + attempt + 1) % ETH_RPCS.length; // rotate for next call
+      return { eth: ethBalance, usdt: usdtBalance };
+    } catch {
+      // Try next RPC
+      continue;
+    }
   }
+  return { eth: 0, usdt: 0, error: "All ETH RPCs failed" };
 }
 
 async function checkTrxBalance(address) {
@@ -249,8 +267,11 @@ for (let i = 0; i < lines.length; i++) {
     addresses: { sol: solW.address, eth: ethW.address, trx: trxW.address },
   });
 
-  // Small delay to avoid rate limits
-  if (i < lines.length - 1) await new Promise(r => setTimeout(r, 1500));
+  // Delay between wallets to avoid rate limits (3s)
+  if (i < lines.length - 1) {
+    console.log(`  ⏳ Waiting 3s before next wallet...`);
+    await new Promise(r => setTimeout(r, 3000));
+  }
 }
 
 // ─── Grand Total ─────────────────────────────────────────────────────
