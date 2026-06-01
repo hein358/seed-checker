@@ -68,26 +68,23 @@ function deriveTron(mnemonic) {
   const hdNode = ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, "m/44'/195'/0'/0/0");
   const privKey = hdNode.privateKey.slice(2);
   
-  // Handle different TronWeb export formats
   let address;
-  if (TronWeb.address && TronWeb.address.fromPrivateKey) {
-    address = TronWeb.address.fromPrivateKey(privKey);
-  } else if (TronWeb.utils && TronWeb.utils.crypto) {
-    address = TronWeb.utils.crypto.getAddressFromPriKey(Buffer.from(privKey, 'hex'));
-  } else {
-    // Fallback: derive from ETH address → TRX address manually
-    const ethAddr = hdNode.address;
-    // TRX address = 0x41 + last 20 bytes of ETH address, base58check encoded
-    const addrBytes = Buffer.from(ethAddr.slice(2), 'hex');
-    const tronBytes = Buffer.concat([Buffer.from([0x41]), addrBytes]);
-    const { sha256 } = await import('node:crypto');
-    // Use TronWeb instance method as fallback
-    try {
+  try {
+    // Try static method
+    if (TronWeb.address && typeof TronWeb.address.fromPrivateKey === "function") {
+      address = TronWeb.address.fromPrivateKey(privKey);
+    } else {
+      // Try instance method
       const tw = new TronWeb({ fullHost: "https://api.trongrid.io" });
-      address = tw.address ? tw.address.fromPrivateKey(privKey) : `0x41${ethAddr.slice(2)}`;
-    } catch {
-      address = `(ETH-equivalent: ${ethAddr})`;
+      if (tw.address && typeof tw.address.fromPrivateKey === "function") {
+        address = tw.address.fromPrivateKey(privKey);
+      } else {
+        // Manual: ETH address shares same key, just show it
+        address = `${hdNode.address} (use in Tron wallet)`;
+      }
     }
+  } catch {
+    address = `${hdNode.address} (ETH-format, import to TronLink)`;
   }
   
   return {
