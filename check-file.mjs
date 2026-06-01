@@ -18,6 +18,7 @@ import { derivePath } from "ed25519-hd-key";
 import { Keypair, Connection, PublicKey } from "@solana/web3.js";
 import { ethers } from "ethers";
 import TronWebModule from "tronweb";
+import { createHash } from "node:crypto";
 import fs from "fs";
 
 const TronWeb = TronWebModule.default || TronWebModule;
@@ -26,7 +27,7 @@ const TronWeb = TronWebModule.default || TronWebModule;
 
 const RPC = {
   solana: "https://api.mainnet-beta.solana.com",
-  ethereum: "https://eth.llamarpc.com",
+  ethereum: "https://rpc.ankr.com/eth",
   tron: "https://api.trongrid.io",
 };
 
@@ -53,23 +54,40 @@ function deriveEthereum(mnemonic) {
 
 function deriveTron(mnemonic) {
   const hdNode = ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, "m/44'/195'/0'/0/0");
-  const privKey = hdNode.privateKey.slice(2);
-  let address;
+  const ethAddr = hdNode.address; // 0x...
+  
+  // Convert ETH address to TRON address (base58check with 0x41 prefix)
+  // ETH address = 0x + 20 bytes hex → TRON = 0x41 + same 20 bytes → base58check
   try {
-    if (TronWeb.address && typeof TronWeb.address.fromPrivateKey === "function") {
-      address = TronWeb.address.fromPrivateKey(privKey);
-    } else {
-      const tw = new TronWeb({ fullHost: "https://api.trongrid.io" });
-      if (tw.address && typeof tw.address.fromPrivateKey === "function") {
-        address = tw.address.fromPrivateKey(privKey);
-      } else {
-        address = `${hdNode.address}`;
-      }
+    const addrBytes = Buffer.from(ethAddr.slice(2), "hex"); // 20 bytes
+    const tronHex = Buffer.concat([Buffer.from([0x41]), addrBytes]); // 21 bytes
+    
+    // Double SHA256 for checksum
+    const hash1 = createHash("sha256").update(tronHex).digest();
+    const hash2 = createHash("sha256").update(hash1).digest();
+    const checksum = hash2.slice(0, 4);
+    
+    const fullAddr = Buffer.concat([tronHex, checksum]); // 25 bytes
+    
+    // Base58 encode
+    const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let num = BigInt("0x" + fullAddr.toString("hex"));
+    let encoded = "";
+    while (num > 0n) {
+      const rem = Number(num % 58n);
+      encoded = ALPHABET[rem] + encoded;
+      num = num / 58n;
     }
+    // Leading zeros
+    for (const byte of fullAddr) {
+      if (byte === 0) encoded = "1" + encoded;
+      else break;
+    }
+    
+    return { chain: "TRX", address: encoded };
   } catch {
-    address = `${hdNode.address}`;
+    return { chain: "TRX", address: `${ethAddr} (convert in TronLink)` };
   }
-  return { chain: "TRX", address };
 }
 
 // ─── Balance Checks ──────────────────────────────────────────────────

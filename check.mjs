@@ -26,7 +26,7 @@ import { createInterface } from "readline";
 
 const RPC = {
   solana: "https://api.mainnet-beta.solana.com",
-  ethereum: "https://eth.llamarpc.com",
+  ethereum: "https://rpc.ankr.com/eth",
   tron: "https://api.trongrid.io",
 };
 
